@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel to XML Batch Converter</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+    <div class="container py-5">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card shadow">
+                    <div class="card-header bg-primary text-white">
+                        <h3 class="card-title mb-0">Excel to XML Batch Converter</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-4">
+                            <label for="excelFile" class="form-label">Choose Excel File</label>
+                            <input type="file" class="form-control" id="excelFile" accept=".xlsx,.xls">
+                        </div>
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-success" id="downloadAllBtn" disabled>Download All XMLs as ZIP</button>
+                            <button class="btn btn-secondary" id="clearAllBtn" disabled>Clear All</button>
+                        </div>
+                        <div class="mt-4">
+                            <label class="form-label">Preview:</label>
+                            <div class="table-responsive">
+                                <table class="table table-bordered table-hover" id="previewTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Wi Number</th>
+                                            <th>Preview</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script>
+        const excelFile = document.getElementById('excelFile');
+        const downloadAllBtn = document.getElementById('downloadAllBtn');
+        const clearAllBtn = document.getElementById('clearAllBtn');
+        const previewTable = document.getElementById('previewTable');
+        let xmlDataArray = [];
+
+        function createXmlFromRow(headers, values) {
+            let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<csv>\n';
+            
+            for (let i = 0; i < headers.length; i++) {
+                if (headers[i]) {
+                    const value = values[i] !== undefined ? values[i].toString().trim() : '';
+                    xml += `  <${headers[i]}>${value}</${headers[i]}>\n`;
+                }
+            }
+            
+            xml += '</csv>';
+            return xml;
+        }
+
+        function downloadSingleXml(xml, wiNumber) {
+            const blob = new Blob([xml], { type: 'application/xml' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${wiNumber}.xml`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        }
+
+        async function downloadAllXmls() {
+            const zip = new JSZip();
+            
+            xmlDataArray.forEach(data => {
+                zip.file(`${data.wiNumber}.xml`, data.xml);
+            });
+            
+            const content = await zip.generateAsync({ type: "blob" });
+            const url = window.URL.createObjectURL(content);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = "xml_files.zip";
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        }
+
+        function updatePreviewTable() {
+            const tbody = previewTable.querySelector('tbody');
+            tbody.innerHTML = '';
+            
+            xmlDataArray.forEach(data => {
+                const row = document.createElement('tr');
+                
+                // Wi Number cell
+                const wiNumberCell = document.createElement('td');
+                wiNumberCell.textContent = data.wiNumber;
+                row.appendChild(wiNumberCell);
+                
+                // Preview cell
+                const previewCell = document.createElement('td');
+                const previewContent = document.createElement('pre');
+                previewContent.style.maxHeight = '100px';
+                previewContent.style.overflow = 'auto';
+                previewContent.style.fontSize = '0.8em';
+                previewContent.textContent = data.xml;
+                previewCell.appendChild(previewContent);
+                row.appendChild(previewCell);
+                
+                // Download button cell
+                const actionCell = document.createElement('td');
+                const downloadBtn = document.createElement('button');
+                downloadBtn.className = 'btn btn-primary btn-sm';
+                downloadBtn.textContent = 'Download';
+                downloadBtn.onclick = () => downloadSingleXml(data.xml, data.wiNumber);
+                actionCell.appendChild(downloadBtn);
+                row.appendChild(actionCell);
+                
+                tbody.appendChild(row);
+            });
+        }
+
+        function convertExcelToXml(file) {
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, {
+                    type: 'array',
+                    cellDates: true,
+                    cellNF: true,
+                    cellText: true
+                });
+
+                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+                const headers = jsonData[0];
+                xmlDataArray = [];
+
+                // Process each row starting from index 1 (skipping headers)
+                for (let i = 1; i < jsonData.length; i++) {
+                    const values = jsonData[i];
+                    if (values.length === 0) continue; // Skip empty rows
+                    
+                    const xml = createXmlFromRow(headers, values);
+                    
+                    // Extract Wi_Number from the row
+                    const wiNumberIndex = headers.indexOf('Wi_Number');
+                    const wiNumber = values[wiNumberIndex] || 'unknown';
+                    
+                    xmlDataArray.push({
+                        wiNumber: wiNumber,
+                        xml: xml
+                    });
+                }
+
+                updatePreviewTable();
+                downloadAllBtn.disabled = xmlDataArray.length === 0;
+                clearAllBtn.disabled = xmlDataArray.length === 0;
+            };
+
+            reader.readAsArrayBuffer(file);
+        }
+
+        function clearAll() {
+            excelFile.value = '';
+            downloadAllBtn.disabled = true;
+            clearAllBtn.disabled = true;
+            previewTable.querySelector('tbody').innerHTML = '';
+            xmlDataArray = [];
+        }
+
+        excelFile.addEventListener('change', function() {
+            const file = this.files[0];
+            if (file) {
+                convertExcelToXml(file);
+            } else {
+                clearAll();
+            }
+        });
+
+        clearAllBtn.addEventListener('click', clearAll);
+
+        downloadAllBtn.addEventListener('click', downloadAllXmls);
+    </script>
+</body>
+</html>

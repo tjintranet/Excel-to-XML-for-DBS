@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<csv>
+  <Wi_Number>319702</Wi_Number>
+  <Customer_ID>THEHIS</Customer_ID>
+  <Customer_Name>The History Press</Customer_Name>
+  <Limp_ISBN>9781803998633</Limp_ISBN>
+  <Cased_ISBN></Cased_ISBN>
+  <Title>Stevie Smith: A Biography</Title>
+  <Trim_Height>234</Trim_Height>
+  <Trim_Width>156</Trim_Width>
+  <Page_Extent>360</Page_Extent>
+  <Spine_Size>26</Spine_Size>
+  <Reel_Width>503</Reel_Width>
+  <Cut_Off>246</Cut_Off>
+  <Imposition>6</Imposition>
+  <Print_Colour>1/1</Print_Colour>
+  <Cover_Board_Size>320 x 450</Cover_Board_Size>
+  <PPC_Stock_Size></PPC_Stock_Size>
+  <JKT_Stock_Size></JKT_Stock_Size>
+  <Paper_Code>DBIR01</Paper_Code>
+  <Cover_Printer>Ricoh 9210</Cover_Printer>
+  <PPC_Printer></PPC_Printer>
+  <Jacket_Printer></Jacket_Printer>
+  <Production_Route>Digital Inkjet</Production_Route>
+  <Final_Copies>200</Final_Copies>
+  <Target_Copies>211</Target_Copies>
+  <Admin Status>08In Inkjet Prod</Admin Status>
+</csv>
