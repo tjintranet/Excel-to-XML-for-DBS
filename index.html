@@ -54,17 +54,35 @@
         let xmlDataArray = [];
 
         function createXmlFromRow(headers, values) {
-            let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<csv>\n';
+            const xmlDoc = document.implementation.createDocument(null, "csv", null);
+            const root = xmlDoc.documentElement;
+            
+            // Add XML declaration processing instruction
+            const pi = xmlDoc.createProcessingInstruction('xml', 'version="1.0" encoding="UTF-8"');
+            xmlDoc.insertBefore(pi, root);
             
             for (let i = 0; i < headers.length; i++) {
                 if (headers[i]) {
+                    // Convert spaces to underscores for XML element names
+                    const elementName = headers[i].replace(/\s+/g, '_');
+                    const element = xmlDoc.createElement(elementName);
                     const value = values[i] !== undefined ? values[i].toString().trim() : '';
-                    xml += `  <${headers[i]}>${value}</${headers[i]}>\n`;
+                    element.textContent = value;
+                    root.appendChild(element);
                 }
             }
             
-            xml += '</csv>';
-            return xml;
+            // Convert to string with proper formatting
+            const serializer = new XMLSerializer();
+            let xmlString = serializer.serializeToString(xmlDoc);
+            
+            // Add newlines and indentation
+            xmlString = xmlString.replace(/></g, '>\n<');
+            xmlString = xmlString.replace(/<csv>/, '<csv>\n');
+            xmlString = xmlString.replace(/<\/csv>/, '\n</csv>');
+            xmlString = xmlString.replace(/<([^/?][^>]*)>/g, '  <$1>');
+            
+            return xmlString;
         }
 
         function downloadSingleXml(xml, wiNumber) {
@@ -142,11 +160,12 @@
                     type: 'array',
                     cellDates: true,
                     cellNF: true,
-                    cellText: true
+                    cellText: true,
+                    raw: true
                 });
 
                 const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
 
                 const headers = jsonData[0];
                 xmlDataArray = [];
@@ -194,7 +213,6 @@
         });
 
         clearAllBtn.addEventListener('click', clearAll);
-
         downloadAllBtn.addEventListener('click', downloadAllXmls);
     </script>
 </body>
