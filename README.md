@@ -14,6 +14,8 @@ A web-based application that converts Excel files to XML format, supporting batc
 - Clear All functionality to reset the interface
 - Responsive design that works on desktop and mobile devices
 - Support for .xlsx and .xls file formats
+- Automatic field name conversion (spaces to underscores)
+- Proper XML encoding and formatting
 
 ## Technical Requirements
 
@@ -61,6 +63,12 @@ The input Excel file should have:
   - Admin_Status
   (and other relevant fields)
 
+## Field Name Handling
+
+- Spaces in Excel column headers are automatically converted to underscores in XML
+- For example, "Admin Status" becomes "Admin_Status" in the XML output
+- This ensures XML validity and compatibility with Switch workflow requirements
+
 ## Generated XML Structure
 
 Each row generates an XML file following this structure:
@@ -81,7 +89,7 @@ Each row generates an XML file following this structure:
 - Preview Table:
   - Wi Number column
   - XML preview column
-  - Download button for each row
+  - Download button for each row (centered)
 - Action Buttons:
   - Download All XMLs as ZIP (green)
   - Clear All (grey)
@@ -92,8 +100,26 @@ The application includes handling for:
 - Invalid file types
 - Empty rows (automatically skipped)
 - Missing Wi_Number (falls back to 'unknown')
+- Invalid XML element names (spaces converted to underscores)
 - File reading errors
 - ZIP creation errors
+
+## Technical Implementation Details
+
+### XML Generation
+
+- Uses the DOM API for proper XML document creation
+- Ensures correct UTF-8 encoding
+- Handles special characters properly
+- Generates well-formed XML with proper indentation
+- Converts invalid element names (with spaces) to valid ones (with underscores)
+
+### Excel Parsing
+
+- Preserves original data types where possible
+- Handles empty cells correctly
+- Properly processes headers
+- Skips empty rows
 
 ## Browser Compatibility
 
@@ -123,7 +149,7 @@ excel-to-xml-converter/
 ### Key JavaScript Functions
 
 - `convertExcelToXml(file)`: Handles the Excel file processing
-- `createXmlFromRow(headers, values)`: Generates XML for a single row
+- `createXmlFromRow(headers, values)`: Generates XML for a single row with proper formatting
 - `downloadSingleXml(xml, wiNumber)`: Downloads individual XML file
 - `downloadAllXmls()`: Creates and downloads ZIP of all XML files
 - `clearAll()`: Resets the interface state
