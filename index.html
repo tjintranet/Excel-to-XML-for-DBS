@@ -30,7 +30,8 @@
                                     <thead>
                                         <tr>
                                             <th>Wi Number</th>
-                                            <th>Preview</th>
+                                            <th>ISBN</th>
+                                            <th>Title</th>
                                             <th>Action</th>
                                         </tr>
                                     </thead>
@@ -127,15 +128,15 @@
                 wiNumberCell.textContent = data.wiNumber;
                 row.appendChild(wiNumberCell);
                 
-                // Preview cell
-                const previewCell = document.createElement('td');
-                const previewContent = document.createElement('pre');
-                previewContent.style.maxHeight = '100px';
-                previewContent.style.overflow = 'auto';
-                previewContent.style.fontSize = '0.8em';
-                previewContent.textContent = data.xml;
-                previewCell.appendChild(previewContent);
-                row.appendChild(previewCell);
+                // ISBN cell
+                const isbnCell = document.createElement('td');
+                isbnCell.textContent = data.isbn;
+                row.appendChild(isbnCell);
+                
+                // Title cell
+                const titleCell = document.createElement('td');
+                titleCell.textContent = data.title;
+                row.appendChild(titleCell);
                 
                 // Download button cell
                 const actionCell = document.createElement('td');
@@ -177,12 +178,24 @@
                     
                     const xml = createXmlFromRow(headers, values);
                     
-                    // Extract Wi_Number from the row
+                    // Extract field values
                     const wiNumberIndex = headers.indexOf('Wi_Number');
+                    const limpIsbnIndex = headers.indexOf('Limp_ISBN');
+                    const casedIsbnIndex = headers.indexOf('Cased_ISBN');
+                    const titleIndex = headers.indexOf('Title');
+                    
+                    // Get values
                     const wiNumber = values[wiNumberIndex] || 'unknown';
+                    const limpIsbn = values[limpIsbnIndex] || '';
+                    const casedIsbn = values[casedIsbnIndex] || '';
+                    // Choose ISBN based on availability (Limp_ISBN first, then Cased_ISBN)
+                    const isbn = limpIsbn || casedIsbn || 'N/A';
+                    const title = values[titleIndex] || 'N/A';
                     
                     xmlDataArray.push({
                         wiNumber: wiNumber,
+                        isbn: isbn,
+                        title: title,
                         xml: xml
                     });
                 }

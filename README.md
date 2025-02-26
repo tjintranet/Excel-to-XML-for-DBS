@@ -7,7 +7,7 @@ A web-based application that converts Excel files to XML format, supporting batc
 - Single-page web application with Bootstrap styling
 - Automatic conversion of Excel files to XML on upload
 - Batch processing of multiple rows
-- Individual XML preview for each row
+- Clear table view displaying key fields (Wi Number, ISBN, Title)
 - Download options:
   - Download individual XML files
   - Download all files as ZIP
@@ -88,7 +88,8 @@ Each row generates an XML file following this structure:
 - File Upload: Select Excel file for conversion
 - Preview Table:
   - Wi Number column
-  - XML preview column
+  - ISBN column (displays Limp_ISBN or Cased_ISBN, whichever has a value)
+  - Title column
   - Download button for each row (centered)
 - Action Buttons:
   - Download All XMLs as ZIP (green)
@@ -120,6 +121,10 @@ The application includes handling for:
 - Handles empty cells correctly
 - Properly processes headers
 - Skips empty rows
+- Intelligently extracts key fields for display:
+  - Wi_Number (used for file naming)
+  - ISBN (prioritizes Limp_ISBN, falls back to Cased_ISBN)
+  - Title
 
 ## Browser Compatibility
 
