@@ -72,7 +72,15 @@
                     // Convert spaces to underscores for XML element names
                     const elementName = headers[i].replace(/\s+/g, '_');
                     const element = xmlDoc.createElement(elementName);
-                    const value = values[i] !== undefined ? values[i].toString().trim() : '';
+                    
+                    // Process the value
+                    let value = values[i] !== undefined ? values[i].toString().trim() : '';
+                    
+                    // If this is the Title field, remove commas
+                    if (elementName === 'Title') {
+                        value = value.replace(/,/g, '');
+                    }
+                    
                     element.textContent = value;
                     root.appendChild(element);
                 }
@@ -195,7 +203,12 @@
                     const casedIsbn = values[casedIsbnIndex] || '';
                     // Choose ISBN based on availability (Limp_ISBN first, then Cased_ISBN)
                     const isbn = limpIsbn || casedIsbn || 'N/A';
-                    const title = values[titleIndex] || 'N/A';
+                    
+                    // Get title and remove commas for display in the table too
+                    let title = values[titleIndex] || 'N/A';
+                    if (title !== 'N/A') {
+                        title = title.toString().replace(/,/g, '');
+                    }
                     
                     xmlDataArray.push({
                         wiNumber: wiNumber,
