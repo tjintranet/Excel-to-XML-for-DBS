@@ -11,6 +11,48 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
     
+    <style>
+        .edit-mode-table td input {
+            width: 100%;
+            border: 1px solid #dee2e6;
+            padding: 4px 8px;
+        }
+        .edit-mode-table {
+            white-space: nowrap;
+        }
+        /* Table container with sticky header */
+        .table-container {
+            max-height: 600px;
+            overflow-y: auto;
+            overflow-x: auto;
+            position: relative;
+        }
+        /* Sticky header styles */
+        .edit-mode-table thead {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .edit-mode-table thead th {
+            background-color: #f8f9fa;
+            border-bottom: 2px solid #dee2e6;
+            box-shadow: 0 2px 2px -1px rgba(0,0,0,0.1);
+        }
+        /* Column width styles */
+        .edit-mode-table th:nth-child(1), .edit-mode-table td:nth-child(1) { min-width: 100px; } /* Wi_Number */
+        .edit-mode-table th:nth-child(2), .edit-mode-table td:nth-child(2), 
+        .edit-mode-table th:nth-child(3), .edit-mode-table td:nth-child(3) { min-width: 130px; } /* ISBNs */
+        .edit-mode-table th:nth-child(4), .edit-mode-table td:nth-child(4) { min-width: 300px; } /* Title */
+        .edit-mode-table th:nth-child(n+5), .edit-mode-table td:nth-child(n+5) { min-width: 110px; } /* Other fields */
+        /* Add zebra striping for better row differentiation */
+        .edit-mode-table tbody tr:nth-of-type(odd) {
+            background-color: rgba(0,0,0,.02);
+        }
+        /* Highlight on row hover */
+        .edit-mode-table tbody tr:hover {
+            background-color: rgba(0,123,255,.05);
+        }
+    </style>
 </head>
 <body class="bg-light">
     <div class="container py-5">
@@ -30,11 +72,23 @@
                             <label for="excelFile" class="form-label">Choose Excel File</label>
                             <input type="file" class="form-control" id="excelFile" accept=".xlsx,.xls">
                         </div>
+                        
+                        <!-- Mode Toggle Buttons -->
+                        <div class="mb-3 btn-group w-100" role="group" id="viewModeToggle">
+                            <input type="radio" class="btn-check" name="viewMode" id="previewMode" autocomplete="off" checked>
+                            <label class="btn btn-outline-primary" for="previewMode">Preview Mode</label>
+                            
+                            <input type="radio" class="btn-check" name="viewMode" id="editMode" autocomplete="off">
+                            <label class="btn btn-outline-primary" for="editMode">Edit Mode <i class="bi bi-pencil-square"></i></label>
+                        </div>
+                        
                         <div class="d-grid gap-2">
                             <button class="btn btn-success" id="downloadAllBtn" disabled>Download All XMLs as ZIP</button>
                             <button class="btn btn-secondary" id="clearAllBtn" disabled>Clear All</button>
                         </div>
-                        <div class="mt-4">
+                        
+                        <!-- Preview Table Section -->
+                        <div class="mt-4" id="previewTableSection">
                             <label class="form-label">Preview:</label>
                             <div class="table-responsive">
                                 <table class="table table-bordered table-hover" id="previewTable">
@@ -50,6 +104,33 @@
                                 </table>
                             </div>
                         </div>
+                        
+                        <!-- Edit Table Section (initially hidden) -->
+                        <div class="mt-4" id="editTableSection" style="display: none;">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <div>
+                                    <label class="form-label mb-0">Edit Data (Showing 12 Key Fields):</label>
+                                    <span class="ms-2 badge bg-secondary" id="rowCountInfo">0 records found</span>
+                                </div>
+                                <button class="btn btn-primary" id="saveChangesBtn"><i class="bi bi-save"></i> Save Changes</button>
+                            </div>
+                            <div class="alert alert-info d-flex align-items-center" role="alert">
+                                <i class="bi bi-info-circle-fill me-2"></i>
+                                <div>
+                                    Scroll through records while keeping column headers visible. Click Save Changes when done.
+                                </div>
+                            </div>
+                            <div class="table-responsive table-container">
+                                <table class="table table-bordered table-hover edit-mode-table" id="editTable">
+                                    <thead>
+                                        <tr>
+                                            <!-- Headers will be populated dynamically -->
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -59,11 +140,59 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script>
+        // DOM elements
         const excelFile = document.getElementById('excelFile');
         const downloadAllBtn = document.getElementById('downloadAllBtn');
         const clearAllBtn = document.getElementById('clearAllBtn');
         const previewTable = document.getElementById('previewTable');
+        const editTable = document.getElementById('editTable');
+        const previewTableSection = document.getElementById('previewTableSection');
+        const editTableSection = document.getElementById('editTableSection');
+        const previewMode = document.getElementById('previewMode');
+        const editMode = document.getElementById('editMode');
+        const saveChangesBtn = document.getElementById('saveChangesBtn');
+        
+        // Data storage
         let xmlDataArray = [];
+        let originalHeaders = [];
+        let rawData = [];
+        
+        // Columns to show in edit mode
+        const editableColumns = [
+            'Wi_Number', 'Limp_ISBN', 'Cased_ISBN', 'Title',
+            'Trim_Height', 'Trim_Width', 'Page_Extent', 'Spine_Size',
+            'Reel_Width', 'Cut_Off', 'Imposition', 'Paper_Code'
+        ];
+
+        // Mode Toggle Buttons
+        previewMode.addEventListener('change', function() {
+            if(this.checked) {
+                previewTableSection.style.display = 'block';
+                editTableSection.style.display = 'none';
+            }
+        });
+        
+        editMode.addEventListener('change', function() {
+            if(this.checked) {
+                previewTableSection.style.display = 'none';
+                editTableSection.style.display = 'block';
+                
+                // Only populate the edit table if we haven't already
+                if (editTable.querySelector('tbody').children.length === 0 && rawData.length > 0) {
+                    populateEditTable();
+                }
+            }
+        });
+        
+        // Save changes from edit mode
+        saveChangesBtn.addEventListener('click', function() {
+            updateDataFromEditTable();
+            regenerateXmlData();
+            updatePreviewTable();
+            previewMode.checked = true;
+            previewTableSection.style.display = 'block';
+            editTableSection.style.display = 'none';
+        });
 
         function createXmlFromRow(headers, values) {
             const xmlDoc = document.implementation.createDocument(null, "csv", null);
@@ -171,6 +300,120 @@
             });
         }
 
+        function populateEditTable() {
+            // Clear existing data
+            const thead = editTable.querySelector('thead tr');
+            const tbody = editTable.querySelector('tbody');
+            thead.innerHTML = '';
+            tbody.innerHTML = '';
+            
+            // Map columns to their indices in the original data
+            const columnIndices = {};
+            editableColumns.forEach(column => {
+                const index = originalHeaders.indexOf(column);
+                if (index !== -1) {
+                    columnIndices[column] = index;
+                }
+            });
+            
+            // Add headers for columns that exist in the data
+            editableColumns.forEach(column => {
+                if (columnIndices[column] !== undefined) {
+                    const th = document.createElement('th');
+                    th.textContent = column;
+                    th.setAttribute('scope', 'col'); // For accessibility
+                    thead.appendChild(th);
+                }
+            });
+            
+            // Add rows with editable cells for only the selected columns
+            rawData.forEach((rowData, rowIndex) => {
+                const row = document.createElement('tr');
+                row.dataset.rowIndex = rowIndex;
+                
+                editableColumns.forEach(column => {
+                    const colIndex = columnIndices[column];
+                    
+                    if (colIndex !== undefined) {
+                        const cell = document.createElement('td');
+                        const input = document.createElement('input');
+                        input.type = 'text';
+                        input.className = 'form-control';
+                        input.value = rowData[colIndex] !== undefined ? rowData[colIndex] : '';
+                        input.dataset.colIndex = colIndex;
+                        
+                        // Add a title attribute for hover tooltip on long text
+                        if (input.value.length > 20) {
+                            input.title = input.value;
+                        }
+                        
+                        cell.appendChild(input);
+                        row.appendChild(cell);
+                    }
+                });
+                
+                tbody.appendChild(row);
+            });
+            
+            // Display row count
+            const rowCount = rawData.length;
+            const rowCountInfo = document.getElementById('rowCountInfo');
+            if (rowCountInfo) {
+                rowCountInfo.textContent = `${rowCount} record${rowCount !== 1 ? 's' : ''} found`;
+            }
+        }
+
+        function updateDataFromEditTable() {
+            const tbody = editTable.querySelector('tbody');
+            const rows = tbody.querySelectorAll('tr');
+            
+            rows.forEach((row, rowIndex) => {
+                const inputs = row.querySelectorAll('input');
+                inputs.forEach(input => {
+                    const colIndex = parseInt(input.dataset.colIndex);
+                    rawData[rowIndex][colIndex] = input.value;
+                });
+            });
+        }
+
+        function regenerateXmlData() {
+            xmlDataArray = [];
+            
+            // Process each row
+            for (let i = 0; i < rawData.length; i++) {
+                const values = rawData[i];
+                if (values.length === 0) continue; // Skip empty rows
+                
+                const xml = createXmlFromRow(originalHeaders, values);
+                
+                // Extract field values
+                const wiNumberIndex = originalHeaders.indexOf('Wi_Number');
+                const limpIsbnIndex = originalHeaders.indexOf('Limp_ISBN');
+                const casedIsbnIndex = originalHeaders.indexOf('Cased_ISBN');
+                const titleIndex = originalHeaders.indexOf('Title');
+                
+                // Get values
+                const wiNumber = values[wiNumberIndex] || 'unknown';
+                const limpIsbn = values[limpIsbnIndex] || '';
+                const casedIsbn = values[casedIsbnIndex] || '';
+                // Choose ISBN based on availability (Limp_ISBN first, then Cased_ISBN)
+                const isbn = limpIsbn || casedIsbn || 'N/A';
+                
+                // Get title and remove commas for display in the table too
+                let title = values[titleIndex] || 'N/A';
+                if (title !== 'N/A') {
+                    title = title.toString().replace(/,/g, '');
+                }
+                
+                xmlDataArray.push({
+                    wiNumber: wiNumber,
+                    isbn: isbn,
+                    title: title,
+                    xml: xml
+                });
+            }
+        }
+
         function convertExcelToXml(file) {
             const reader = new FileReader();
             
@@ -187,44 +430,18 @@
                 const worksheet = workbook.Sheets[workbook.SheetNames[0]];
                 const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
 
-                const headers = jsonData[0];
+                originalHeaders = jsonData[0];
+                rawData = jsonData.slice(1).filter(row => row.length > 0); // Skip empty rows
+                
+                // Reset and regenerate XML data
                 xmlDataArray = [];
-
-                // Process each row starting from index 1 (skipping headers)
-                for (let i = 1; i < jsonData.length; i++) {
-                    const values = jsonData[i];
-                    if (values.length === 0) continue; // Skip empty rows
-                    
-                    const xml = createXmlFromRow(headers, values);
-                    
-                    // Extract field values
-                    const wiNumberIndex = headers.indexOf('Wi_Number');
-                    const limpIsbnIndex = headers.indexOf('Limp_ISBN');
-                    const casedIsbnIndex = headers.indexOf('Cased_ISBN');
-                    const titleIndex = headers.indexOf('Title');
-                    
-                    // Get values
-                    const wiNumber = values[wiNumberIndex] || 'unknown';
-                    const limpIsbn = values[limpIsbnIndex] || '';
-                    const casedIsbn = values[casedIsbnIndex] || '';
-                    // Choose ISBN based on availability (Limp_ISBN first, then Cased_ISBN)
-                    const isbn = limpIsbn || casedIsbn || 'N/A';
-                    
-                    // Get title and remove commas for display in the table too
-                    let title = values[titleIndex] || 'N/A';
-                    if (title !== 'N/A') {
-                        title = title.toString().replace(/,/g, '');
-                    }
-                    
-                    xmlDataArray.push({
-                        wiNumber: wiNumber,
-                        isbn: isbn,
-                        title: title,
-                        xml: xml
-                    });
-                }
-
+                regenerateXmlData();
+                
+                // Update UI
                 updatePreviewTable();
+                populateEditTable();
+                
+                // Enable buttons
                 downloadAllBtn.disabled = xmlDataArray.length === 0;
                 clearAllBtn.disabled = xmlDataArray.length === 0;
             };
@@ -237,7 +454,16 @@
             downloadAllBtn.disabled = true;
             clearAllBtn.disabled = true;
             previewTable.querySelector('tbody').innerHTML = '';
+            editTable.querySelector('thead tr').innerHTML = '';
+            editTable.querySelector('tbody').innerHTML = '';
             xmlDataArray = [];
+            originalHeaders = [];
+            rawData = [];
+            
+            // Reset to preview mode
+            previewMode.checked = true;
+            previewTableSection.style.display = 'block';
+            editTableSection.style.display = 'none';
         }
 
         excelFile.addEventListener('change', function() {
