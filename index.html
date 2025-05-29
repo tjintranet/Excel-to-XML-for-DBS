@@ -52,6 +52,18 @@
         .edit-mode-table tbody tr:hover {
             background-color: rgba(0,123,255,.05);
         }
+        /* Highlight adjusted rows */
+        .trim-width-adjusted {
+            background-color: rgba(255,193,7,.1) !important;
+        }
+        .trim-width-adjusted input {
+            background-color: rgba(255,193,7,.2);
+        }
+        /* Processing indicator */
+        .processing-indicator {
+            display: none;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body class="bg-light">
@@ -71,6 +83,18 @@
                         <div class="mb-4">
                             <label for="excelFile" class="form-label">Choose Excel File</label>
                             <input type="file" class="form-control" id="excelFile" accept=".xlsx,.xls">
+                        </div>
+                        
+                        <!-- Processing Status -->
+                        <div class="alert alert-info processing-indicator" id="processingIndicator">
+                            <i class="bi bi-gear-fill me-2"></i>
+                            <span id="processingText">Processing file...</span>
+                        </div>
+                        
+                        <!-- Adjustment Summary -->
+                        <div class="alert alert-warning d-none" id="adjustmentSummary">
+                            <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                            <span id="adjustmentText"></span>
                         </div>
                         
                         <!-- Mode Toggle Buttons -->
@@ -97,6 +121,8 @@
                                             <th>Wi Number</th>
                                             <th>ISBN</th>
                                             <th>Title</th>
+                                            <th>Production Route</th>
+                                            <th>Trim Width</th>
                                             <th>Action</th>
                                         </tr>
                                     </thead>
@@ -118,6 +144,7 @@
                                 <i class="bi bi-info-circle-fill me-2"></i>
                                 <div>
                                     Scroll through records while keeping column headers visible. Click Save Changes when done.
+                                    <br><small class="text-muted">Rows with adjusted Trim Width are highlighted in yellow.</small>
                                 </div>
                             </div>
                             <div class="table-responsive table-container">
@@ -151,11 +178,14 @@
         const previewMode = document.getElementById('previewMode');
         const editMode = document.getElementById('editMode');
         const saveChangesBtn = document.getElementById('saveChangesBtn');
+        const processingIndicator = document.getElementById('processingIndicator');
+        const adjustmentSummary = document.getElementById('adjustmentSummary');
         
         // Data storage
         let xmlDataArray = [];
         let originalHeaders = [];
         let rawData = [];
+        let adjustedRows = new Set(); // Track which rows had Trim_Width adjusted
         
         // Columns to show in edit mode
         const editableColumns = [
@@ -193,6 +223,81 @@
             previewTableSection.style.display = 'block';
             editTableSection.style.display = 'none';
         });
+
+        function showProcessingIndicator(text) {
+            document.getElementById('processingText').textContent = text;
+            processingIndicator.style.display = 'block';
+        }
+
+        function hideProcessingIndicator() {
+            processingIndicator.style.display = 'none';
+        }
+
+        function showAdjustmentSummary(count) {
+            const adjustmentText = document.getElementById('adjustmentText');
+            adjustmentText.textContent = `${count} row(s) with "Limp P/Bound 8pp Cover" production route detected. Trim_Width values have been automatically increased by 10.`;
+            adjustmentSummary.classList.remove('d-none');
+        }
+
+        function hideAdjustmentSummary() {
+            adjustmentSummary.classList.add('d-none');
+        }
+
+        function applyProductionRouteLogic() {
+            showProcessingIndicator('Applying production route logic...');
+            
+            // Find column indices
+            const productionRouteIndex = originalHeaders.indexOf('Production_Route');
+            const trimWidthIndex = originalHeaders.indexOf('Trim_Width');
+            
+            if (productionRouteIndex === -1) {
+                console.warn('Production_Route column not found');
+                hideProcessingIndicator();
+                return 0;
+            }
+            
+            if (trimWidthIndex === -1) {
+                console.warn('Trim_Width column not found');
+                hideProcessingIndicator();
+                return 0;
+            }
+            
+            let adjustmentCount = 0;
+            adjustedRows.clear();
+            
+            // Process each row
+            for (let i = 0; i < rawData.length; i++) {
+                const row = rawData[i];
+                const productionRoute = row[productionRouteIndex];
+                const currentTrimWidth = row[trimWidthIndex];
+                
+                // Check if Production_Route matches the target value
+                if (productionRoute && productionRoute.toString().trim() === 'Limp P/Bound 8pp Cover') {
+                    // Convert Trim_Width to number and add 10
+                    let trimWidthValue = parseFloat(currentTrimWidth) || 0;
+                    trimWidthValue += 10;
+                    
+                    // Update the value in rawData
+                    rawData[i][trimWidthIndex] = trimWidthValue.toString();
+                    
+                    // Track this row as adjusted
+                    adjustedRows.add(i);
+                    adjustmentCount++;
+                    
+                    console.log(`Row ${i + 2}: Adjusted Trim_Width from ${currentTrimWidth} to ${trimWidthValue} (Production_Route: "${productionRoute}")`);
+                }
+            }
+            
+            hideProcessingIndicator();
+            
+            if (adjustmentCount > 0) {
+                showAdjustmentSummary(adjustmentCount);
+            } else {
+                hideAdjustmentSummary();
+            }
+            
+            return adjustmentCount;
+        }
 
         function createXmlFromRow(headers, values) {
             const xmlDoc = document.implementation.createDocument(null, "csv", null);
@@ -268,8 +373,13 @@
             const tbody = previewTable.querySelector('tbody');
             tbody.innerHTML = '';
             
-            xmlDataArray.forEach(data => {
+            xmlDataArray.forEach((data, index) => {
                 const row = document.createElement('tr');
+                
+                // Add class if this row was adjusted
+                if (adjustedRows.has(index)) {
+                    row.classList.add('trim-width-adjusted');
+                }
                 
                 // Wi Number cell
                 const wiNumberCell = document.createElement('td');
@@ -285,6 +395,19 @@
                 const titleCell = document.createElement('td');
                 titleCell.textContent = data.title;
                 row.appendChild(titleCell);
+                
+                // Production Route cell
+                const productionRouteCell = document.createElement('td');
+                productionRouteCell.textContent = data.productionRoute;
+                row.appendChild(productionRouteCell);
+                
+                // Trim Width cell
+                const trimWidthCell = document.createElement('td');
+                trimWidthCell.textContent = data.trimWidth;
+                if (adjustedRows.has(index)) {
+                    trimWidthCell.innerHTML = `<strong>${data.trimWidth}</strong> <i class="bi bi-plus-circle-fill text-warning" title="Adjusted +10"></i>`;
+                }
+                row.appendChild(trimWidthCell);
                 
                 // Download button cell
                 const actionCell = document.createElement('td');
@@ -330,6 +453,11 @@
             rawData.forEach((rowData, rowIndex) => {
                 const row = document.createElement('tr');
                 row.dataset.rowIndex = rowIndex;
+                
+                // Add class if this row was adjusted
+                if (adjustedRows.has(rowIndex)) {
+                    row.classList.add('trim-width-adjusted');
+                }
                 
                 editableColumns.forEach(column => {
                     const colIndex = columnIndices[column];
@@ -391,6 +519,8 @@
                 const limpIsbnIndex = originalHeaders.indexOf('Limp_ISBN');
                 const casedIsbnIndex = originalHeaders.indexOf('Cased_ISBN');
                 const titleIndex = originalHeaders.indexOf('Title');
+                const productionRouteIndex = originalHeaders.indexOf('Production_Route');
+                const trimWidthIndex = originalHeaders.indexOf('Trim_Width');
                 
                 // Get values
                 const wiNumber = values[wiNumberIndex] || 'unknown';
@@ -405,19 +535,29 @@
                     title = title.toString().replace(/,/g, '');
                 }
                 
+                // Get production route and trim width for display
+                const productionRoute = values[productionRouteIndex] || 'N/A';
+                const trimWidth = values[trimWidthIndex] || 'N/A';
+                
                 xmlDataArray.push({
                     wiNumber: wiNumber,
                     isbn: isbn,
                     title: title,
+                    productionRoute: productionRoute,
+                    trimWidth: trimWidth,
                     xml: xml
                 });
             }
         }
 
         function convertExcelToXml(file) {
+            showProcessingIndicator('Reading Excel file...');
+            
             const reader = new FileReader();
             
             reader.onload = function(e) {
+                showProcessingIndicator('Parsing Excel data...');
+                
                 const data = new Uint8Array(e.target.result);
                 const workbook = XLSX.read(data, {
                     type: 'array',
@@ -433,9 +573,16 @@
                 originalHeaders = jsonData[0];
                 rawData = jsonData.slice(1).filter(row => row.length > 0); // Skip empty rows
                 
+                // Apply production route logic
+                const adjustmentCount = applyProductionRouteLogic();
+                
+                showProcessingIndicator('Generating XML data...');
+                
                 // Reset and regenerate XML data
                 xmlDataArray = [];
                 regenerateXmlData();
+                
+                showProcessingIndicator('Updating interface...');
                 
                 // Update UI
                 updatePreviewTable();
@@ -444,6 +591,10 @@
                 // Enable buttons
                 downloadAllBtn.disabled = xmlDataArray.length === 0;
                 clearAllBtn.disabled = xmlDataArray.length === 0;
+                
+                hideProcessingIndicator();
+                
+                console.log(`Processing complete. ${adjustmentCount} rows adjusted for Production Route logic.`);
             };
 
             reader.readAsArrayBuffer(file);
@@ -459,6 +610,11 @@
             xmlDataArray = [];
             originalHeaders = [];
             rawData = [];
+            adjustedRows.clear();
+            
+            // Hide indicators
+            hideProcessingIndicator();
+            hideAdjustmentSummary();
             
             // Reset to preview mode
             previewMode.checked = true;
