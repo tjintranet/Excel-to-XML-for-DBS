@@ -64,6 +64,22 @@
             display: none;
             margin-top: 10px;
         }
+        .barcode-string {
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            color: #6c757d;
+            max-width: 200px;
+            word-break: break-all;
+            white-space: normal;
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            transition: background-color 0.2s ease;
+        }
+        .barcode-string:hover {
+            background-color: hsl(46, 91%, 66%);
+            border: 1px solid #dee2e6;
+        }
     </style>
 </head>
 <body class="bg-light">
@@ -81,8 +97,14 @@
                     </div>
                     <div class="card-body">
                         <div class="mb-4">
-                            <label for="excelFile" class="form-label">Choose Excel File</label>
-                            <input type="file" class="form-control" id="excelFile" accept=".xlsx,.xls">
+                            <label for="excelFile" class="form-label">Choose Excel or XML File(s)</label>
+                            <input type="file" class="form-control" id="excelFile" accept=".xlsx,.xls,.xml" multiple>
+                            <div class="form-text">
+                                <small class="text-muted">
+                                    <i class="bi bi-info-circle me-1"></i>
+                                    Supports single Excel file (.xlsx, .xls) for batch processing or upload XML file for editing previously exported data
+                                </small>
+                            </div>
                         </div>
                         
                         <!-- Processing Status -->
@@ -123,7 +145,8 @@
                                             <th>Title</th>
                                             <th>Production Route</th>
                                             <th>Trim Width</th>
-                                            <th>Action</th>
+                                            <th>Barcode String</th>
+                                            <th>XML</th>
                                         </tr>
                                     </thead>
                                     <tbody></tbody>
@@ -135,7 +158,7 @@
                         <div class="mt-4" id="editTableSection" style="display: none;">
                             <div class="d-flex justify-content-between align-items-center mb-2">
                                 <div>
-                                    <label class="form-label mb-0">Edit Data (Showing 12 Key Fields):</label>
+                                    <label class="form-label mb-0">Edit Data (Showing Key Fields + Barcode String):</label>
                                     <span class="ms-2 badge bg-secondary" id="rowCountInfo">0 records found</span>
                                 </div>
                                 <button class="btn btn-primary" id="saveChangesBtn"><i class="bi bi-save"></i> Save Changes</button>
@@ -143,7 +166,7 @@
                             <div class="alert alert-info d-flex align-items-center" role="alert">
                                 <i class="bi bi-info-circle-fill me-2"></i>
                                 <div>
-                                    Scroll through records while keeping column headers visible. Click Save Changes when done.
+                                    Scroll through records while keeping column headers visible. Barcode strings are generated automatically and will be included in XML. Click Save Changes when done.
                                     <br><small class="text-muted">Rows with adjusted Trim Width are highlighted in yellow.</small>
                                 </div>
                             </div>
@@ -164,475 +187,11 @@
         </div>
     </div>
 
+    <!-- External Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script>
-        // DOM elements
-        const excelFile = document.getElementById('excelFile');
-        const downloadAllBtn = document.getElementById('downloadAllBtn');
-        const clearAllBtn = document.getElementById('clearAllBtn');
-        const previewTable = document.getElementById('previewTable');
-        const editTable = document.getElementById('editTable');
-        const previewTableSection = document.getElementById('previewTableSection');
-        const editTableSection = document.getElementById('editTableSection');
-        const previewMode = document.getElementById('previewMode');
-        const editMode = document.getElementById('editMode');
-        const saveChangesBtn = document.getElementById('saveChangesBtn');
-        const processingIndicator = document.getElementById('processingIndicator');
-        const adjustmentSummary = document.getElementById('adjustmentSummary');
-        
-        // Data storage
-        let xmlDataArray = [];
-        let originalHeaders = [];
-        let rawData = [];
-        let adjustedRows = new Set(); // Track which rows had Trim_Width adjusted
-        
-        // Columns to show in edit mode
-        const editableColumns = [
-            'Wi_Number', 'Limp_ISBN', 'Cased_ISBN', 'Title',
-            'Trim_Height', 'Trim_Width', 'Page_Extent', 'Spine_Size',
-            'Reel_Width', 'Cut_Off', 'Imposition', 'Paper_Code'
-        ];
-
-        // Mode Toggle Buttons
-        previewMode.addEventListener('change', function() {
-            if(this.checked) {
-                previewTableSection.style.display = 'block';
-                editTableSection.style.display = 'none';
-            }
-        });
-        
-        editMode.addEventListener('change', function() {
-            if(this.checked) {
-                previewTableSection.style.display = 'none';
-                editTableSection.style.display = 'block';
-                
-                // Only populate the edit table if we haven't already
-                if (editTable.querySelector('tbody').children.length === 0 && rawData.length > 0) {
-                    populateEditTable();
-                }
-            }
-        });
-        
-        // Save changes from edit mode
-        saveChangesBtn.addEventListener('click', function() {
-            updateDataFromEditTable();
-            regenerateXmlData();
-            updatePreviewTable();
-            previewMode.checked = true;
-            previewTableSection.style.display = 'block';
-            editTableSection.style.display = 'none';
-        });
-
-        function showProcessingIndicator(text) {
-            document.getElementById('processingText').textContent = text;
-            processingIndicator.style.display = 'block';
-        }
-
-        function hideProcessingIndicator() {
-            processingIndicator.style.display = 'none';
-        }
-
-        function showAdjustmentSummary(count) {
-            const adjustmentText = document.getElementById('adjustmentText');
-            adjustmentText.textContent = `${count} row(s) with "Limp P/Bound 8pp Cover" production route detected. Trim_Width values have been automatically increased by 10.`;
-            adjustmentSummary.classList.remove('d-none');
-        }
-
-        function hideAdjustmentSummary() {
-            adjustmentSummary.classList.add('d-none');
-        }
-
-        function applyProductionRouteLogic() {
-            showProcessingIndicator('Applying production route logic...');
-            
-            // Find column indices
-            const productionRouteIndex = originalHeaders.indexOf('Production_Route');
-            const trimWidthIndex = originalHeaders.indexOf('Trim_Width');
-            
-            if (productionRouteIndex === -1) {
-                console.warn('Production_Route column not found');
-                hideProcessingIndicator();
-                return 0;
-            }
-            
-            if (trimWidthIndex === -1) {
-                console.warn('Trim_Width column not found');
-                hideProcessingIndicator();
-                return 0;
-            }
-            
-            let adjustmentCount = 0;
-            adjustedRows.clear();
-            
-            // Process each row
-            for (let i = 0; i < rawData.length; i++) {
-                const row = rawData[i];
-                const productionRoute = row[productionRouteIndex];
-                const currentTrimWidth = row[trimWidthIndex];
-                
-                // Check if Production_Route matches the target value
-                if (productionRoute && productionRoute.toString().trim() === 'Limp P/Bound 8pp Cover') {
-                    // Convert Trim_Width to number and add 10
-                    let trimWidthValue = parseFloat(currentTrimWidth) || 0;
-                    trimWidthValue += 10;
-                    
-                    // Update the value in rawData
-                    rawData[i][trimWidthIndex] = trimWidthValue.toString();
-                    
-                    // Track this row as adjusted
-                    adjustedRows.add(i);
-                    adjustmentCount++;
-                    
-                    console.log(`Row ${i + 2}: Adjusted Trim_Width from ${currentTrimWidth} to ${trimWidthValue} (Production_Route: "${productionRoute}")`);
-                }
-            }
-            
-            hideProcessingIndicator();
-            
-            if (adjustmentCount > 0) {
-                showAdjustmentSummary(adjustmentCount);
-            } else {
-                hideAdjustmentSummary();
-            }
-            
-            return adjustmentCount;
-        }
-
-        function createXmlFromRow(headers, values) {
-            const xmlDoc = document.implementation.createDocument(null, "csv", null);
-            const root = xmlDoc.documentElement;
-            
-            // Add XML declaration processing instruction
-            const pi = xmlDoc.createProcessingInstruction('xml', 'version="1.0" encoding="UTF-8"');
-            xmlDoc.insertBefore(pi, root);
-            
-            for (let i = 0; i < headers.length; i++) {
-                if (headers[i]) {
-                    // Convert spaces to underscores for XML element names
-                    const elementName = headers[i].replace(/\s+/g, '_');
-                    const element = xmlDoc.createElement(elementName);
-                    
-                    // Process the value
-                    let value = values[i] !== undefined ? values[i].toString().trim() : '';
-                    
-                    // If this is the Title field, remove commas
-                    if (elementName === 'Title') {
-                        value = value.replace(/,/g, '');
-                    }
-                    
-                    element.textContent = value;
-                    root.appendChild(element);
-                }
-            }
-            
-            // Convert to string with proper formatting
-            const serializer = new XMLSerializer();
-            let xmlString = serializer.serializeToString(xmlDoc);
-            
-            // Add newlines and indentation
-            xmlString = xmlString.replace(/></g, '>\n<');
-            xmlString = xmlString.replace(/<csv>/, '<csv>\n');
-            xmlString = xmlString.replace(/<\/csv>/, '\n</csv>');
-            xmlString = xmlString.replace(/<([^/?][^>]*)>/g, '  <$1>');
-            
-            return xmlString;
-        }
-
-        function downloadSingleXml(xml, wiNumber) {
-            const blob = new Blob([xml], { type: 'application/xml' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${wiNumber}.xml`;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-        }
-
-        async function downloadAllXmls() {
-            const zip = new JSZip();
-            
-            xmlDataArray.forEach(data => {
-                zip.file(`${data.wiNumber}.xml`, data.xml);
-            });
-            
-            const content = await zip.generateAsync({ type: "blob" });
-            const url = window.URL.createObjectURL(content);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = "xml_files.zip";
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-        }
-
-        function updatePreviewTable() {
-            const tbody = previewTable.querySelector('tbody');
-            tbody.innerHTML = '';
-            
-            xmlDataArray.forEach((data, index) => {
-                const row = document.createElement('tr');
-                
-                // Add class if this row was adjusted
-                if (adjustedRows.has(index)) {
-                    row.classList.add('trim-width-adjusted');
-                }
-                
-                // Wi Number cell
-                const wiNumberCell = document.createElement('td');
-                wiNumberCell.textContent = data.wiNumber;
-                row.appendChild(wiNumberCell);
-                
-                // ISBN cell
-                const isbnCell = document.createElement('td');
-                isbnCell.textContent = data.isbn;
-                row.appendChild(isbnCell);
-                
-                // Title cell
-                const titleCell = document.createElement('td');
-                titleCell.textContent = data.title;
-                row.appendChild(titleCell);
-                
-                // Production Route cell
-                const productionRouteCell = document.createElement('td');
-                productionRouteCell.textContent = data.productionRoute;
-                row.appendChild(productionRouteCell);
-                
-                // Trim Width cell
-                const trimWidthCell = document.createElement('td');
-                trimWidthCell.textContent = data.trimWidth;
-                if (adjustedRows.has(index)) {
-                    trimWidthCell.innerHTML = `<strong>${data.trimWidth}</strong> <i class="bi bi-plus-circle-fill text-warning" title="Adjusted +10"></i>`;
-                }
-                row.appendChild(trimWidthCell);
-                
-                // Download button cell
-                const actionCell = document.createElement('td');
-                actionCell.className = 'text-center';
-                const downloadBtn = document.createElement('button');
-                downloadBtn.className = 'btn btn-primary btn-sm';
-                downloadBtn.textContent = 'Download';
-                downloadBtn.onclick = () => downloadSingleXml(data.xml, data.wiNumber);
-                actionCell.appendChild(downloadBtn);
-                row.appendChild(actionCell);
-                
-                tbody.appendChild(row);
-            });
-        }
-
-        function populateEditTable() {
-            // Clear existing data
-            const thead = editTable.querySelector('thead tr');
-            const tbody = editTable.querySelector('tbody');
-            thead.innerHTML = '';
-            tbody.innerHTML = '';
-            
-            // Map columns to their indices in the original data
-            const columnIndices = {};
-            editableColumns.forEach(column => {
-                const index = originalHeaders.indexOf(column);
-                if (index !== -1) {
-                    columnIndices[column] = index;
-                }
-            });
-            
-            // Add headers for columns that exist in the data
-            editableColumns.forEach(column => {
-                if (columnIndices[column] !== undefined) {
-                    const th = document.createElement('th');
-                    th.textContent = column;
-                    th.setAttribute('scope', 'col'); // For accessibility
-                    thead.appendChild(th);
-                }
-            });
-            
-            // Add rows with editable cells for only the selected columns
-            rawData.forEach((rowData, rowIndex) => {
-                const row = document.createElement('tr');
-                row.dataset.rowIndex = rowIndex;
-                
-                // Add class if this row was adjusted
-                if (adjustedRows.has(rowIndex)) {
-                    row.classList.add('trim-width-adjusted');
-                }
-                
-                editableColumns.forEach(column => {
-                    const colIndex = columnIndices[column];
-                    
-                    if (colIndex !== undefined) {
-                        const cell = document.createElement('td');
-                        const input = document.createElement('input');
-                        input.type = 'text';
-                        input.className = 'form-control';
-                        input.value = rowData[colIndex] !== undefined ? rowData[colIndex] : '';
-                        input.dataset.colIndex = colIndex;
-                        
-                        // Add a title attribute for hover tooltip on long text
-                        if (input.value.length > 20) {
-                            input.title = input.value;
-                        }
-                        
-                        cell.appendChild(input);
-                        row.appendChild(cell);
-                    }
-                });
-                
-                tbody.appendChild(row);
-            });
-            
-            // Display row count
-            const rowCount = rawData.length;
-            const rowCountInfo = document.getElementById('rowCountInfo');
-            if (rowCountInfo) {
-                rowCountInfo.textContent = `${rowCount} record${rowCount !== 1 ? 's' : ''} found`;
-            }
-        }
-
-        function updateDataFromEditTable() {
-            const tbody = editTable.querySelector('tbody');
-            const rows = tbody.querySelectorAll('tr');
-            
-            rows.forEach((row, rowIndex) => {
-                const inputs = row.querySelectorAll('input');
-                inputs.forEach(input => {
-                    const colIndex = parseInt(input.dataset.colIndex);
-                    rawData[rowIndex][colIndex] = input.value;
-                });
-            });
-        }
-
-        function regenerateXmlData() {
-            xmlDataArray = [];
-            
-            // Process each row
-            for (let i = 0; i < rawData.length; i++) {
-                const values = rawData[i];
-                if (values.length === 0) continue; // Skip empty rows
-                
-                const xml = createXmlFromRow(originalHeaders, values);
-                
-                // Extract field values
-                const wiNumberIndex = originalHeaders.indexOf('Wi_Number');
-                const limpIsbnIndex = originalHeaders.indexOf('Limp_ISBN');
-                const casedIsbnIndex = originalHeaders.indexOf('Cased_ISBN');
-                const titleIndex = originalHeaders.indexOf('Title');
-                const productionRouteIndex = originalHeaders.indexOf('Production_Route');
-                const trimWidthIndex = originalHeaders.indexOf('Trim_Width');
-                
-                // Get values
-                const wiNumber = values[wiNumberIndex] || 'unknown';
-                const limpIsbn = values[limpIsbnIndex] || '';
-                const casedIsbn = values[casedIsbnIndex] || '';
-                // Choose ISBN based on availability (Limp_ISBN first, then Cased_ISBN)
-                const isbn = limpIsbn || casedIsbn || 'N/A';
-                
-                // Get title and remove commas for display in the table too
-                let title = values[titleIndex] || 'N/A';
-                if (title !== 'N/A') {
-                    title = title.toString().replace(/,/g, '');
-                }
-                
-                // Get production route and trim width for display
-                const productionRoute = values[productionRouteIndex] || 'N/A';
-                const trimWidth = values[trimWidthIndex] || 'N/A';
-                
-                xmlDataArray.push({
-                    wiNumber: wiNumber,
-                    isbn: isbn,
-                    title: title,
-                    productionRoute: productionRoute,
-                    trimWidth: trimWidth,
-                    xml: xml
-                });
-            }
-        }
-
-        function convertExcelToXml(file) {
-            showProcessingIndicator('Reading Excel file...');
-            
-            const reader = new FileReader();
-            
-            reader.onload = function(e) {
-                showProcessingIndicator('Parsing Excel data...');
-                
-                const data = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(data, {
-                    type: 'array',
-                    cellDates: true,
-                    cellNF: true,
-                    cellText: true,
-                    raw: true
-                });
-
-                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
-
-                originalHeaders = jsonData[0];
-                rawData = jsonData.slice(1).filter(row => row.length > 0); // Skip empty rows
-                
-                // Apply production route logic
-                const adjustmentCount = applyProductionRouteLogic();
-                
-                showProcessingIndicator('Generating XML data...');
-                
-                // Reset and regenerate XML data
-                xmlDataArray = [];
-                regenerateXmlData();
-                
-                showProcessingIndicator('Updating interface...');
-                
-                // Update UI
-                updatePreviewTable();
-                populateEditTable();
-                
-                // Enable buttons
-                downloadAllBtn.disabled = xmlDataArray.length === 0;
-                clearAllBtn.disabled = xmlDataArray.length === 0;
-                
-                hideProcessingIndicator();
-                
-                console.log(`Processing complete. ${adjustmentCount} rows adjusted for Production Route logic.`);
-            };
-
-            reader.readAsArrayBuffer(file);
-        }
-
-        function clearAll() {
-            excelFile.value = '';
-            downloadAllBtn.disabled = true;
-            clearAllBtn.disabled = true;
-            previewTable.querySelector('tbody').innerHTML = '';
-            editTable.querySelector('thead tr').innerHTML = '';
-            editTable.querySelector('tbody').innerHTML = '';
-            xmlDataArray = [];
-            originalHeaders = [];
-            rawData = [];
-            adjustedRows.clear();
-            
-            // Hide indicators
-            hideProcessingIndicator();
-            hideAdjustmentSummary();
-            
-            // Reset to preview mode
-            previewMode.checked = true;
-            previewTableSection.style.display = 'block';
-            editTableSection.style.display = 'none';
-        }
-
-        excelFile.addEventListener('change', function() {
-            const file = this.files[0];
-            if (file) {
-                convertExcelToXml(file);
-            } else {
-                clearAll();
-            }
-        });
-
-        clearAllBtn.addEventListener('click', clearAll);
-        downloadAllBtn.addEventListener('click', downloadAllXmls);
-    </script>
+    
+    <!-- Main Application Script -->
+    <script src="script.js"></script>
 </body>
 </html>
